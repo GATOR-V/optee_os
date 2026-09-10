@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BSD-2-Clause
 /*
  * Copyright (c) 2023 Andes Technology Corporation
- * Copyright 2022-2023, 2026 NXP
+ * Copyright 2022-2023,2026 NXP
  */
 
 #include <assert.h>

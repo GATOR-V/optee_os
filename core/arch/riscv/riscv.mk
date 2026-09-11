@@ -87,6 +87,20 @@ endif
 
 # 'y' to let M-mode secure monitor handle the communication between OP-TEE OS
 # and untrusted domain.
+# Reach the REE through the RPMI TEE service group (RPMI v2.0) instead
+# of an M-mode security monitor: OP-TEE runs on its own harts and
+# every exit to the REE is a TEE_EXIT on the MPXY channel of the
+# service group, see core/arch/riscv/kernel/rpmi_tee.c.
+CFG_RISCV_RPMI_TEE ?= n
+ifeq ($(CFG_RISCV_RPMI_TEE),y)
+$(call force,CFG_RISCV_WITH_M_MODE_SM,n)
+$(call force,CFG_RISCV_SBI,y)
+$(call force,CFG_RISCV_SBI_MPXY,y)
+$(call force,CFG_RISCV_SBI_MPXY_RPMI,y)
+$(call force,CFG_CORE_DYN_SHM,y)
+$(call force,CFG_CORE_RESERVED_SHM,n)
+endif
+
 CFG_RISCV_WITH_M_MODE_SM ?= n
 ifeq ($(CFG_RISCV_WITH_M_MODE_SM),y)
 $(call force,CFG_RISCV_SBI,y)

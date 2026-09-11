@@ -21,6 +21,9 @@
 #include <tee/entry_std.h>
 #include <tee/optee_abi.h>
 #include <tee/teeabi_opteed.h>
+#ifdef CFG_RISCV_RPMI_TEE
+#include <kernel/rpmi_tee.h>
+#endif
 #include <tee/tee_cryp_utl.h>
 #include <tee/tee_fs_rpc.h>
 
@@ -618,6 +621,23 @@ static struct mobj *get_rpc_alloc_res(struct optee_msg_arg *arg,
 	if (arg->ret || arg->num_params != 1)
 		goto err;
 
+#ifdef CFG_RISCV_RPMI_TEE
+	if (arg->params[0].attr != OPTEE_MSG_ATTR_TYPE_FMEM_OUTPUT)
+		goto err;
+	sz = READ_ONCE(arg->params[0].u.fmem.size);
+	cookie = READ_ONCE(arg->params[0].u.fmem.global_id);
+	if (sz < size)
+		goto err;
+	mobj = rpmi_tee_mobj_get_by_cookie(cookie,
+					   READ_ONCE(arg->params[0].u.fmem.internal_offs));
+	if (!mobj)
+		goto err;
+	if (mobj_inc_map(mobj)) {
+		mobj_put(mobj);
+		goto err;
+	}
+	return mobj;
+#endif
 	if (arg->params[0].attr != OPTEE_MSG_ATTR_TYPE_TMEM_OUTPUT  &&
 	    arg->params[0].attr != (OPTEE_MSG_ATTR_TYPE_TMEM_OUTPUT |
 				    OPTEE_MSG_ATTR_NONCONTIG))

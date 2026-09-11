@@ -7,6 +7,8 @@ srcs-$(CFG_RISCV_SBI) += sbi.c
 srcs-$(CFG_RISCV_SBI_CONSOLE) += sbi_console.c
 srcs-$(CFG_RISCV_SBI_MPXY) += sbi_mpxy.c
 srcs-$(CFG_RISCV_SBI_MPXY_RPMI) += sbi_mpxy_rpmi.c
+srcs-$(CFG_RISCV_RPMI_TEE) += rpmi_tee.c
+cppflags-rpmi_tee.c-y += -DTEE_IMPL_GIT_SHA1=$(TEE_IMPL_GIT_SHA1)
 srcs-y += boot.c
 srcs-y += entry.S
 srcs-y += abort.c

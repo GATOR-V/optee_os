@@ -43,7 +43,15 @@ $(call force,CFG_RISCV_S_MODE,y)
 $(call force,CFG_RISCV_TIME_SOURCE_RDTIME,y)
 CFG_RISCV_MTIME_RATE ?= 10000000
 CFG_RISCV_SBI ?= y
+# With CFG_RISCV_RPMI_TEE=y OP-TEE is reached through the RPMI TEE
+# service group of the M-mode firmware instead of an M-mode security
+# monitor, see core/arch/riscv/kernel/rpmi_tee.c
+CFG_RISCV_RPMI_TEE ?= n
+ifeq ($(CFG_RISCV_RPMI_TEE),y)
+CFG_RISCV_WITH_M_MODE_SM ?= n
+else
 CFG_RISCV_WITH_M_MODE_SM ?= y
+endif
 
 # TA-related flags
 supported-ta-targets = ta_rv64

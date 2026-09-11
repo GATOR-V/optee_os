@@ -26,6 +26,9 @@
 #ifdef CFG_CORE_FFA
 #include <kernel/thread_spmc.h>
 #endif
+#ifdef CFG_RISCV_RPMI_TEE
+#include <kernel/rpmi_tee.h>
+#endif
 
 #define SHM_CACHE_ATTRS	\
 	(uint32_t)(core_mmu_is_shm_cached() ? \
@@ -63,7 +66,7 @@ static bool __maybe_unused param_mem_from_mobj(struct param_mem *mem,
 	return true;
 }
 
-#ifdef CFG_CORE_FFA
+#if defined(CFG_CORE_FFA) || defined(CFG_RISCV_RPMI_TEE)
 static TEE_Result set_fmem_param(const struct optee_msg_param_fmem *fmem,
 				 struct param_mem *mem)
 {
@@ -77,8 +80,13 @@ static TEE_Result set_fmem_param(const struct optee_msg_param_fmem *fmem,
 		mem->size = 0;
 		return TEE_SUCCESS;
 	}
+#ifdef CFG_CORE_FFA
 	mem->mobj = mobj_ffa_get_by_cookie(global_id,
 					   READ_ONCE(fmem->internal_offs));
+#else
+	mem->mobj = rpmi_tee_mobj_get_by_cookie(global_id,
+						READ_ONCE(fmem->internal_offs));
+#endif
 	if (!mem->mobj)
 		return TEE_ERROR_BAD_PARAMETERS;
 
@@ -179,7 +187,7 @@ static TEE_Result set_rmem_param(const struct optee_msg_param_rmem *rmem,
 	return TEE_SUCCESS;
 }
 #endif /*CFG_CORE_DYN_SHM*/
-#endif /*!CFG_CORE_FFA*/
+#endif /*!CFG_CORE_FFA && !CFG_RISCV_RPMI_TEE*/
 
 static TEE_Result copy_in_params(const struct optee_msg_param *params,
 				 uint32_t num_params,
@@ -216,7 +224,7 @@ static TEE_Result copy_in_params(const struct optee_msg_param *params,
 			ta_param->u[n].val.a = READ_ONCE(params[n].u.value.a);
 			ta_param->u[n].val.b = READ_ONCE(params[n].u.value.b);
 			break;
-#ifdef CFG_CORE_FFA
+#if defined(CFG_CORE_FFA) || defined(CFG_RISCV_RPMI_TEE)
 		case OPTEE_MSG_ATTR_TYPE_FMEM_INPUT:
 		case OPTEE_MSG_ATTR_TYPE_FMEM_OUTPUT:
 		case OPTEE_MSG_ATTR_TYPE_FMEM_INOUT:

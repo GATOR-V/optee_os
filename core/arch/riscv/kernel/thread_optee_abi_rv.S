@@ -33,6 +33,9 @@ FUNC thread_return_to_udomain , :
 	li	a7, SBI_EXT_TEE		/* extension ID */
 	li	a6, 0			/* function ID (unused) */
 	ecall
+#elif defined(CFG_RISCV_RPMI_TEE)
+	/* Exit through the RPMI TEE framework, never returns */
+	j	thread_rpmi_tee_return
 #else
 	/* Other protocol */
 #endif

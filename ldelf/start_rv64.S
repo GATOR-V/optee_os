@@ -40,11 +40,12 @@ FUNC _ldelf_start , :
 	addi	t4, zero, R_RISCV_RELATIVE
 	bne	t2, t4, 3f
 
-	/* Update the pointer at r_offset + load offset */
+	/*
+	 * Update the pointer at r_offset + load offset with
+	 * r_addend + load offset.
+	 */
 	add	t1, a1, t1
-	ld	t4, 0(t1)
-	add	t4, t4, t3
-	add	t4, t4, a1
+	add	t4, t3, a1
 	sd	t4, 0(t1)
 	ble	a2, a3, 1b
 2:

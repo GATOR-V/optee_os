@@ -34,16 +34,12 @@ static bool mpxy_available;
 
 static struct mpxy_core_local *mpxy_get_core_local(void)
 {
-	struct mpxy_core_local *mpxy = NULL;
-	uint32_t hart_id = 0;
+	size_t pos = get_core_pos();
 
 	assert((thread_get_exceptions() & THREAD_EXCP_ALL) == THREAD_EXCP_ALL);
+	assert(pos < CFG_TEE_CORE_NB_CORE);
 
-	hart_id = thread_get_hartid();
-
-	mpxy = &mpxy_core_local_array[hart_id];
-
-	return mpxy;
+	return &mpxy_core_local_array[pos];
 }
 
 /**

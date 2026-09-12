@@ -32,8 +32,11 @@ TEE_Result rpmi_tee_parcel_release(uint64_t cookie);
  * thread_return_to_udomain() with the TEEABI_OPTEED_RETURN_* arguments.
  * Never returns: the next TEE_CALL is dispatched from here.
  */
-void __noreturn thread_rpmi_tee_return(unsigned long a0, unsigned long a1,
-				       unsigned long a2, unsigned long a3,
-				       unsigned long a4, unsigned long a5);
+/* Prepare the next dispatch; returns RPMI_TEE_DISPATCH_STD/_FAST */
+int rpmi_tee_next(unsigned long a0, unsigned long a1, unsigned long a4);
+uint32_t *rpmi_tee_dispatch_args(void);
+void __noreturn thread_rpmi_tee_dispatch(unsigned long a0, unsigned long a1,
+					 unsigned long a2, unsigned long a3,
+					 unsigned long a4, unsigned long a5);
 
 #endif /*__KERNEL_RPMI_TEE_H*/

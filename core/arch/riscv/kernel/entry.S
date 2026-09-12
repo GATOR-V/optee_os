@@ -404,8 +404,8 @@ UNWIND(	.cantunwind)
 #endif
 	jal	boot_init_secondary
 	cpu_is_ready
-#ifdef CFG_RISCV_WITH_M_MODE_SM
-	/* Return to untrusted domain */
+#if defined(CFG_RISCV_WITH_M_MODE_SM) || defined(CFG_RISCV_RPMI_TEE)
+	/* Return to untrusted domain (RPMI TEE: enter the TEE_EXIT loop) */
 	li	a0, TEEABI_OPTEED_RETURN_ON_DONE
 	li	a1, 0
 	li	a2, 0

@@ -361,66 +361,77 @@ static void handle_fast_call(struct optee_rpmi_msg *req,
 }
 
 /*
- * Handle a yielding call. Only returns on failure, a successful call
- * exits through thread_return_to_udomain().
+ * Per-hart pending dispatch, filled by rpmi_tee_next() and consumed by the
+ * assembly trampoline thread_rpmi_tee_dispatch().
  */
-static void handle_yielding_call(struct optee_rpmi_msg *req,
-				 struct optee_rpmi_msg *rsp)
+#define RPMI_TEE_DISPATCH_STD	0	/* via vector_std_abi_entry */
+#define RPMI_TEE_DISPATCH_FAST	1	/* via vector_fast_abi_entry */
+
+/* Per-hart ABI args (a0..a3) for the pending vector entry */
+static uint32_t dispatch_args[CFG_TEE_CORE_NB_CORE][4];
+
+/* Base of this hart's dispatch args, for the asm trampoline */
+uint32_t *rpmi_tee_dispatch_args(void)
 {
-	struct mobj *mobj = NULL;
+	return dispatch_args[get_core_pos()];
+}
+
+/* Translate a fast (non-yielding) OP-TEE service call inline */
+static void handle_fast_optee(struct optee_rpmi_msg *req,
+			      struct optee_rpmi_msg *rsp)
+{
 	uint64_t cookie = 0;
-	uint32_t rv = 0;
 
 	memset(rsp, 0, sizeof(*rsp));
-	rsp->w[1] = OPTEE_RPMI_YIELDING_CALL_RETURN_DONE;
 
 	switch (req->w[0]) {
-	case OPTEE_RPMI_YIELDING_CALL_WITH_ARG:
+	case OPTEE_RPMI_GET_API_VERSION:
+		rsp->w[0] = OPTEE_RPMI_VERSION_MAJOR;
+		rsp->w[1] = OPTEE_RPMI_VERSION_MINOR;
+		break;
+	case OPTEE_RPMI_GET_OS_VERSION:
+		rsp->w[0] = CFG_OPTEE_REVISION_MAJOR;
+		rsp->w[1] = CFG_OPTEE_REVISION_MINOR;
+		rsp->w[2] = TEE_IMPL_GIT_SHA1 >> 32;
+		break;
+	case OPTEE_RPMI_EXCHANGE_CAPABILITIES:
+		rsp->w[0] = TEE_SUCCESS;
+		rsp->w[1] = OPTEE_RPMI_SEC_CAP_ARG_OFFSET;
+		if (IS_ENABLED(CFG_RPMB_FS) && IS_ENABLED(CFG_CORE_RPMB_PROBE))
+			rsp->w[1] |= OPTEE_RPMI_SEC_CAP_RPMB_PROBE;
+		rsp->w[2] = THREAD_RPC_MAX_NUM_PARAMS;
+		break;
+	case OPTEE_RPMI_UNREGISTER_SHM:
 		cookie = reg_pair_to_64(req->w[2], req->w[1]);
-		/* Make sure the memory parcel is accepted and registered */
-		mobj = rpmi_tee_mobj_get_by_cookie(cookie, 0);
-		if (!mobj) {
-			rsp->w[0] = TEE_ERROR_BAD_PARAMETERS;
-			return;
-		}
-		mobj_put(mobj);
-		/* a1 is the upper half of the cookie, a2 the lower half */
-		rv = thread_handle_std_abi(OPTEE_ABI_CALL_WITH_REGD_ARG,
-					   req->w[2], req->w[1], req->w[3],
-					   0, 0, 0, 0);
-		break;
-	case OPTEE_RPMI_YIELDING_CALL_RESUME:
-		rv = thread_handle_std_abi(OPTEE_ABI_CALL_RETURN_FROM_RPC,
-					   0, 0, req->w[4], 0, 0, 0, 0);
+		rsp->w[0] = rpmi_tee_parcel_release(cookie);
 		break;
 	default:
-		rv = OPTEE_ABI_RETURN_EBADCMD;
-	}
-
-	switch (rv) {
-	case OPTEE_ABI_RETURN_ETHREAD_LIMIT:
-		rsp->w[0] = TEE_ERROR_BUSY;
-		break;
-	default:
-		rsp->w[0] = TEE_ERROR_BAD_PARAMETERS;
+		rsp->w[0] = TEE_ERROR_NOT_SUPPORTED;
 	}
 }
 
-void __noreturn thread_rpmi_tee_return(unsigned long a0, unsigned long a1,
-				       unsigned long a2 __unused,
-				       unsigned long a3 __unused,
-				       unsigned long a4,
-				       unsigned long a5 __unused)
+/*
+ * Send the result of the call this hart just finished as the TEE_EXIT
+ * request data, then fetch the next TEE_CALL. Fast OP-TEE calls are
+ * answered inline in a loop (they need no thread); the first yielding
+ * call found is prepared in dispatch[] for thread_rpmi_tee_dispatch() to
+ * run through the vector entries, which allocate a thread. Returns a
+ * pointer to the pending dispatch.
+ *
+ * @a0/@a1/@a4 are the TEEABI_OPTEED_RETURN_* arguments of the ABI exit
+ * that led here (see make_exit_response()).
+ */
+int rpmi_tee_next(unsigned long a0, unsigned long a1, unsigned long a4)
 {
 	size_t pos = get_core_pos();
 	struct rpmi_tee_exit_req *req = &exit_req[pos];
 	struct rpmi_tee_exit_rsp *rsp = (void *)exit_rsp[pos];
+	uint32_t *d = dispatch_args[pos];
 	struct optee_rpmi_msg call = { };
 	size_t rsp_len = 0;
 	int rc = 0;
 
 	assert(pos < CFG_TEE_CORE_NB_CORE);
-
 	rpmi_tee_get_channel();
 
 	if (make_exit_response(&req->rsp, a0, a1, a4))
@@ -451,10 +462,33 @@ void __noreturn thread_rpmi_tee_return(unsigned long a0, unsigned long a1,
 		rpmi_tee_self_id = rsp->call.target_id;
 		memcpy(&call, &rsp->data, sizeof(call));
 
-		if (call.w[0] & BIT32(OPTEE_RPMI_YIELDING_CALL_BIT))
-			handle_yielding_call(&call, &req->rsp);
-		else
-			handle_fast_call(&call, &req->rsp);
-		req->rsp_len = sizeof(req->rsp);
+		if (!(call.w[0] & BIT32(OPTEE_RPMI_YIELDING_CALL_BIT))) {
+			/* Fast call: answer inline, loop for the next one */
+			handle_fast_optee(&call, &req->rsp);
+			req->rsp_len = sizeof(req->rsp);
+			continue;
+		}
+
+		/* Yielding call: run it in a thread via the vector entry */
+		switch (call.w[0]) {
+		case OPTEE_RPMI_YIELDING_CALL_WITH_ARG:
+			d[0] = OPTEE_ABI_CALL_WITH_REGD_ARG;
+			d[1] = call.w[2];	/* cookie high */
+			d[2] = call.w[1];	/* cookie low */
+			d[3] = call.w[3];	/* offset */
+			return RPMI_TEE_DISPATCH_STD;
+		case OPTEE_RPMI_YIELDING_CALL_RESUME:
+			d[0] = OPTEE_ABI_CALL_RETURN_FROM_RPC;
+			d[1] = 0;
+			d[2] = 0;
+			d[3] = call.w[4];	/* resume info */
+			return RPMI_TEE_DISPATCH_STD;
+		default:
+			memset(&req->rsp, 0, sizeof(req->rsp));
+			req->rsp.w[0] = TEE_ERROR_NOT_SUPPORTED;
+			req->rsp.w[1] = OPTEE_RPMI_YIELDING_CALL_RETURN_DONE;
+			req->rsp_len = sizeof(req->rsp);
+			continue;
+		}
 	}
 }

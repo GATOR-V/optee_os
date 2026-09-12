@@ -35,13 +35,43 @@ FUNC thread_return_to_udomain , :
 	ecall
 #elif defined(CFG_RISCV_RPMI_TEE)
 	/* Exit through the RPMI TEE framework, never returns */
-	j	thread_rpmi_tee_return
+	j	thread_rpmi_tee_dispatch
 #else
 	/* Other protocol */
 #endif
 	/* ABI to REE should not return */
 	panic_at_abi_return
 END_FUNC thread_return_to_udomain
+
+#if defined(CFG_RISCV_RPMI_TEE)
+/*
+ * void __noreturn thread_rpmi_tee_dispatch(unsigned long a0, unsigned long a1,
+ *                                          unsigned long a2, unsigned long a3,
+ *                                          unsigned long a4, unsigned long a5);
+ *
+ * Reached from thread_return_to_udomain() on the temporary stack with no
+ * current thread. Hands the finished call's result back to the REE and
+ * fetches the next TEE_CALL via rpmi_tee_next(), then enters it through
+ * the standard vector so that a thread is allocated exactly like the
+ * M-mode security monitor path. The loop is formed by the vector's own
+ * exit landing back in thread_return_to_udomain().
+ */
+FUNC thread_rpmi_tee_dispatch , :
+	/* rpmi_tee_next(ret, abi_ret, resume_info) */
+	mv	a2, a4
+	jal	rpmi_tee_next
+	mv	s0, a0			/* entry selector */
+	jal	rpmi_tee_dispatch_args
+	/* a0 -> uint32_t args[4] */
+	lw	a3, 12(a0)
+	lw	a2, 8(a0)
+	lw	a1, 4(a0)
+	lw	a0, 0(a0)
+	bnez	s0, 1f
+	j	vector_std_abi_entry
+1:	j	vector_fast_abi_entry
+END_FUNC thread_rpmi_tee_dispatch
+#endif
 
 FUNC thread_std_abi_entry , :
 	jal	__thread_std_abi_entry

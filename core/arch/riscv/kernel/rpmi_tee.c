@@ -264,6 +264,17 @@ TEE_Result rpmi_tee_parcel_release(uint64_t cookie)
 	int rc = 0;
 
 	res = mobj_reg_shm_release_by_cookie(cookie);
+	if (res == TEE_ERROR_BAD_PARAMETERS) {
+		/*
+		 * No mobj registered for this cookie: OP-TEE never accepted the
+		 * parcel (lazy PARCEL_ACCEPT happens only on first use) or it
+		 * was already released. Nothing is mapped to release, and the
+		 * never-accepted parcel stays reclaimable by the REE, so report
+		 * success instead of failing a client unregister of an unused
+		 * shared buffer.
+		 */
+		return TEE_SUCCESS;
+	}
 	if (res)
 		return res;
 
@@ -281,6 +292,14 @@ TEE_Result rpmi_tee_parcel_release(uint64_t cookie)
 static bool make_exit_response(struct optee_rpmi_msg *rsp, unsigned long a0,
 			       unsigned long a1, unsigned long a4)
 {
+	/*
+	 * The ABI return code is a 32-bit value. It reaches us sign-extended
+	 * to 64 bits in a1 (the RISC-V psABI keeps 32-bit values in registers
+	 * sign-extended), so the RPC codes 0xffff00xx arrive as
+	 * 0xffffffffffff00xx. Truncate to 32 bits before matching.
+	 */
+	uint32_t abi_ret = a1;
+
 	memset(rsp, 0, sizeof(*rsp));
 
 	switch (a0) {
@@ -294,9 +313,9 @@ static bool make_exit_response(struct optee_rpmi_msg *rsp, unsigned long a0,
 		panic("unexpected return to REE");
 	}
 
-	if (OPTEE_ABI_RETURN_IS_RPC(a1)) {
+	if (OPTEE_ABI_RETURN_IS_RPC(abi_ret)) {
 		rsp->w[4] = a4;
-		switch (a1) {
+		switch (abi_ret) {
 		case OPTEE_ABI_RETURN_RPC_FOREIGN_INTR:
 			rsp->w[1] = OPTEE_RPMI_YIELDING_CALL_RETURN_INTERRUPT;
 			break;
@@ -305,14 +324,14 @@ static bool make_exit_response(struct optee_rpmi_msg *rsp, unsigned long a0,
 			break;
 		default:
 			/* Register based RPC allocations are not used */
-			EMSG("Unsupported RPC %#lx", a1);
+			EMSG("Unsupported RPC %#"PRIx32, abi_ret);
 			rsp->w[0] = TEE_ERROR_NOT_SUPPORTED;
 			rsp->w[1] = OPTEE_RPMI_YIELDING_CALL_RETURN_DONE;
 		}
 		return true;
 	}
 
-	switch (a1) {
+	switch (abi_ret) {
 	case OPTEE_ABI_RETURN_OK:
 		rsp->w[0] = TEE_SUCCESS;
 		break;

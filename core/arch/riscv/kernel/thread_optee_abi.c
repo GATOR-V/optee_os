@@ -425,6 +425,38 @@ err:
 	return NULL;
 }
 
+#ifdef CFG_RISCV_RPMI_TEE
+/*
+ * The RPMI conduit carries every memory reference as an FMEM parameter,
+ * keyed by the global memory-parcel id. Mirror the inbound decoding in
+ * set_fmem_param() (core/tee/entry_std.c): a reference with no backing
+ * object (used to query a size) carries the invalid global id.
+ */
+static bool set_fmem(struct optee_msg_param *param, struct thread_param *tpm)
+{
+	struct mobj *mobj = tpm->u.memref.mobj;
+	uint64_t offs = tpm->u.memref.offs;
+
+	param->attr = tpm->attr - THREAD_PARAM_ATTR_MEMREF_IN +
+		      OPTEE_MSG_ATTR_TYPE_FMEM_INPUT;
+	param->u.fmem.offs_low = offs;
+	param->u.fmem.offs_high = offs >> 32;
+	param->u.fmem.internal_offs = 0;
+	param->u.fmem.size = tpm->u.memref.size;
+
+	if (mobj) {
+		uint64_t cookie = mobj_get_cookie(mobj);
+
+		if (!cookie)
+			return false;
+		param->u.fmem.global_id = cookie;
+	} else {
+		param->u.fmem.global_id = OPTEE_MSG_FMEM_INVALID_GLOBAL_ID;
+	}
+
+	return true;
+}
+#else
 static bool set_rmem(struct optee_msg_param *param,
 		     struct thread_param *tpm)
 {
@@ -466,6 +498,7 @@ static bool set_tmem(struct optee_msg_param *param,
 
 	return true;
 }
+#endif
 
 static uint32_t get_rpc_arg(uint32_t cmd, size_t num_params,
 			    struct thread_param *params, void **arg_ret,
@@ -517,6 +550,10 @@ static uint32_t get_rpc_arg(uint32_t cmd, size_t num_params,
 		case THREAD_PARAM_ATTR_MEMREF_IN:
 		case THREAD_PARAM_ATTR_MEMREF_OUT:
 		case THREAD_PARAM_ATTR_MEMREF_INOUT:
+#ifdef CFG_RISCV_RPMI_TEE
+			if (!set_fmem(arg->params + n, params + n))
+				return TEE_ERROR_BAD_PARAMETERS;
+#else
 			if (!params[n].u.memref.mobj ||
 			    mobj_matches(params[n].u.memref.mobj,
 					 CORE_MEM_NSEC_SHM)) {
@@ -529,6 +566,7 @@ static uint32_t get_rpc_arg(uint32_t cmd, size_t num_params,
 			} else {
 				return TEE_ERROR_BAD_PARAMETERS;
 			}
+#endif
 			break;
 		default:
 			return TEE_ERROR_BAD_PARAMETERS;
@@ -608,7 +646,25 @@ static void thread_rpc_free(unsigned int bt, uint64_t cookie, struct mobj *mobj)
 	uint32_t ret = get_rpc_arg(OPTEE_RPC_CMD_SHM_FREE, 1, &param,
 				   &arg, &carg);
 
+#ifdef CFG_RISCV_RPMI_TEE
+	/*
+	 * RPC buffers are one-shot: unlike client shared memory there is no
+	 * UNREGISTER_SHM to release the parcel. Balance the mobj_inc_map()
+	 * done in get_rpc_alloc_res() and release the parcel here (dropping
+	 * the registry reference taken by rpmi_tee_mobj_get_by_cookie() and
+	 * sending PARCEL_RELEASE) before asking the REE to free and reclaim
+	 * it. Otherwise the parcel is still accepted when the REE reclaims
+	 * it, the reclaim fails (RPMI_ERR_BUSY) and the parcel leaks,
+	 * eventually exhausting the fixed parcel pool.
+	 */
+	if (mobj) {
+		mobj_dec_map(mobj);
+		mobj_put(mobj);
+		rpmi_tee_parcel_release(cookie);
+	}
+#else
 	mobj_put(mobj);
+#endif
 
 	if (!ret) {
 		reg_pair_from_64(carg, rpc_args + 1, rpc_args + 2);

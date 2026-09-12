@@ -20,7 +20,15 @@ static inline void scall_get_max_args(struct thread_scall_regs *regs,
 static inline void scall_set_retval(struct thread_scall_regs *regs,
 				    uint32_t ret_val)
 {
-	regs->a0 = ret_val;
+	/*
+	 * a0 is restored verbatim to the user TA on return. The RISC-V
+	 * psABI keeps a 32-bit value in a register sign-extended to XLEN,
+	 * and TA code compares the full register against sign-extended
+	 * constants (e.g. TEE_ERROR_* such as 0xffff0008). Sign-extend the
+	 * result so those comparisons match; a plain uint32_t assignment
+	 * would zero-extend and break them.
+	 */
+	regs->a0 = (unsigned long)(long)(int32_t)ret_val;
 }
 
 static inline void scall_set_sys_return_regs(struct thread_scall_regs *regs,

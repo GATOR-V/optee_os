@@ -327,39 +327,6 @@ static bool make_exit_response(struct optee_rpmi_msg *rsp, unsigned long a0,
 	return true;
 }
 
-static void handle_fast_call(struct optee_rpmi_msg *req,
-			     struct optee_rpmi_msg *rsp)
-{
-	uint64_t cookie = 0;
-
-	memset(rsp, 0, sizeof(*rsp));
-
-	switch (req->w[0]) {
-	case OPTEE_RPMI_GET_API_VERSION:
-		rsp->w[0] = OPTEE_RPMI_VERSION_MAJOR;
-		rsp->w[1] = OPTEE_RPMI_VERSION_MINOR;
-		break;
-	case OPTEE_RPMI_GET_OS_VERSION:
-		rsp->w[0] = CFG_OPTEE_REVISION_MAJOR;
-		rsp->w[1] = CFG_OPTEE_REVISION_MINOR;
-		rsp->w[2] = TEE_IMPL_GIT_SHA1 >> 32;
-		break;
-	case OPTEE_RPMI_EXCHANGE_CAPABILITIES:
-		rsp->w[0] = TEE_SUCCESS;
-		rsp->w[1] = OPTEE_RPMI_SEC_CAP_ARG_OFFSET;
-		if (IS_ENABLED(CFG_RPMB_FS) && IS_ENABLED(CFG_CORE_RPMB_PROBE))
-			rsp->w[1] |= OPTEE_RPMI_SEC_CAP_RPMB_PROBE;
-		rsp->w[2] = THREAD_RPC_MAX_NUM_PARAMS;
-		break;
-	case OPTEE_RPMI_UNREGISTER_SHM:
-		cookie = reg_pair_to_64(req->w[2], req->w[1]);
-		rsp->w[0] = rpmi_tee_parcel_release(cookie);
-		break;
-	default:
-		rsp->w[0] = TEE_ERROR_NOT_SUPPORTED;
-	}
-}
-
 /*
  * Per-hart pending dispatch, filled by rpmi_tee_next() and consumed by the
  * assembly trampoline thread_rpmi_tee_dispatch().
@@ -428,6 +395,7 @@ int rpmi_tee_next(unsigned long a0, unsigned long a1, unsigned long a4)
 	struct rpmi_tee_exit_rsp *rsp = (void *)exit_rsp[pos];
 	uint32_t *d = dispatch_args[pos];
 	struct optee_rpmi_msg call = { };
+	struct mobj *mobj = NULL;
 	size_t rsp_len = 0;
 	int rc = 0;
 
@@ -472,6 +440,22 @@ int rpmi_tee_next(unsigned long a0, unsigned long a1, unsigned long a4)
 		/* Yielding call: run it in a thread via the vector entry */
 		switch (call.w[0]) {
 		case OPTEE_RPMI_YIELDING_CALL_WITH_ARG:
+			/*
+			 * Accept the memory parcel holding the argument and
+			 * register it as shared memory before entering the
+			 * ABI, which only looks registered cookies up.
+			 */
+			mobj = rpmi_tee_mobj_get_by_cookie(reg_pair_to_64(call.w[2],
+								    call.w[1]), 0);
+			if (!mobj) {
+				memset(&req->rsp, 0, sizeof(req->rsp));
+				req->rsp.w[0] = TEE_ERROR_BAD_PARAMETERS;
+				req->rsp.w[1] =
+					OPTEE_RPMI_YIELDING_CALL_RETURN_DONE;
+				req->rsp_len = sizeof(req->rsp);
+				continue;
+			}
+			mobj_put(mobj);
 			d[0] = OPTEE_ABI_CALL_WITH_REGD_ARG;
 			d[1] = call.w[2];	/* cookie high */
 			d[2] = call.w[1];	/* cookie low */

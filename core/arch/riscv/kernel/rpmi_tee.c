@@ -384,8 +384,9 @@ static void handle_yielding_call(struct optee_rpmi_msg *req,
 			return;
 		}
 		mobj_put(mobj);
+		/* a1 is the upper half of the cookie, a2 the lower half */
 		rv = thread_handle_std_abi(OPTEE_ABI_CALL_WITH_REGD_ARG,
-					   req->w[1], req->w[2], req->w[3],
+					   req->w[2], req->w[1], req->w[3],
 					   0, 0, 0, 0);
 		break;
 	case OPTEE_RPMI_YIELDING_CALL_RESUME:

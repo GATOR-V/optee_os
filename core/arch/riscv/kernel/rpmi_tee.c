@@ -347,8 +347,6 @@ uint32_t *rpmi_tee_dispatch_args(void)
 static void handle_fast_optee(struct optee_rpmi_msg *req,
 			      struct optee_rpmi_msg *rsp)
 {
-	uint64_t cookie = 0;
-
 	memset(rsp, 0, sizeof(*rsp));
 
 	switch (req->w[0]) {
@@ -367,10 +365,6 @@ static void handle_fast_optee(struct optee_rpmi_msg *req,
 		if (IS_ENABLED(CFG_RPMB_FS) && IS_ENABLED(CFG_CORE_RPMB_PROBE))
 			rsp->w[1] |= OPTEE_RPMI_SEC_CAP_RPMB_PROBE;
 		rsp->w[2] = THREAD_RPC_MAX_NUM_PARAMS;
-		break;
-	case OPTEE_RPMI_UNREGISTER_SHM:
-		cookie = reg_pair_to_64(req->w[2], req->w[1]);
-		rsp->w[0] = rpmi_tee_parcel_release(cookie);
 		break;
 	default:
 		rsp->w[0] = TEE_ERROR_NOT_SUPPORTED;
@@ -429,6 +423,18 @@ int rpmi_tee_next(unsigned long a0, unsigned long a1, unsigned long a4)
 		}
 		rpmi_tee_self_id = rsp->call.target_id;
 		memcpy(&call, &rsp->data, sizeof(call));
+
+		if (call.w[0] == OPTEE_RPMI_UNREGISTER_SHM) {
+			/*
+			 * Releasing registered shared memory takes a mutex,
+			 * run it in a thread through the std entry.
+			 */
+			d[0] = OPTEE_ABI_CALL_RPMI_UNREGISTER_SHM;
+			d[1] = call.w[2];	/* cookie high */
+			d[2] = call.w[1];	/* cookie low */
+			d[3] = 0;
+			return RPMI_TEE_DISPATCH_STD;
+		}
 
 		if (!(call.w[0] & BIT32(OPTEE_RPMI_YIELDING_CALL_BIT))) {
 			/* Fast call: answer inline, loop for the next one */

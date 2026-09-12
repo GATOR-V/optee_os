@@ -283,6 +283,12 @@ static uint32_t std_abi_entry(uint32_t a0, uint32_t a1, uint32_t a2,
 					   with_rpc_arg);
 	case OPTEE_ABI_CALL_WITH_REGD_ARG:
 		return std_entry_with_regd_arg(reg_pair_to_64(a1, a2), a3);
+#ifdef CFG_RISCV_RPMI_TEE
+	case OPTEE_ABI_CALL_RPMI_UNREGISTER_SHM:
+		if (rpmi_tee_parcel_release(reg_pair_to_64(a1, a2)))
+			return OPTEE_ABI_RETURN_EBADADDR;
+		return OPTEE_ABI_RETURN_OK;
+#endif
 	default:
 		EMSG("Unknown ABI 0x%"PRIx32, a0);
 		return OPTEE_ABI_RETURN_EBADCMD;

@@ -28,6 +28,16 @@ struct mobj *rpmi_tee_mobj_get_by_cookie(uint64_t cookie,
 TEE_Result rpmi_tee_parcel_release(uint64_t cookie);
 
 /*
+ * Private std ABI call used to run OPTEE_RPMI_UNREGISTER_SHM in a thread:
+ * releasing a registered shared memory object takes a mutex and may wait,
+ * which is not possible on the temporary stack where fast calls run.
+ * a1 = upper 32 bits of the parcel handle, a2 = lower 32 bits.
+ */
+#define OPTEE_ABI_FUNCID_RPMI_UNREGISTER_SHM	U(0x1000)
+#define OPTEE_ABI_CALL_RPMI_UNREGISTER_SHM \
+	OPTEE_ABI_STD_CALL_VAL(OPTEE_ABI_FUNCID_RPMI_UNREGISTER_SHM)
+
+/*
  * Return to the REE through the framework, called by
  * thread_return_to_udomain() with the TEEABI_OPTEED_RETURN_* arguments.
  * Never returns: the next TEE_CALL is dispatched from here.

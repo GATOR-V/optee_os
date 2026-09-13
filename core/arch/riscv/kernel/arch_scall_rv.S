@@ -38,6 +38,20 @@ FUNC scall_do_call , :
 	load_xregs	sp, 0, 1
 
 	addi	sp, sp, 16
+	/*
+	 * scall_do_call() is declared to return uint32_t. The RISC-V psABI
+	 * requires a 32-bit return value to be sign-extended to XLEN, and both
+	 * TA and core code compare the full a0 register against sign-extended
+	 * TEE_Result constants (e.g. TEE_ERROR_CANCEL, 0xffff0002). Some
+	 * syscalls return a0 through paths that do not honour that rule, most
+	 * notably syscall_sys_return()->scall_sys_return_helper() (the value a
+	 * TA passes to utee_return()) and syscall_invoke_ta_command() (the
+	 * result unwound from a nested TA). scall_handle_user_ta() then stores
+	 * this value via scall_set_retval(), whose sign-extension the compiler
+	 * elides because it assumes our uint32_t return is already extended.
+	 * Force the sign-extension here so it holds for every syscall.
+	 */
+	sext.w	a0, a0
 	ret
 END_FUNC scall_do_call
 

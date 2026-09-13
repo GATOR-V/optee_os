@@ -64,6 +64,18 @@
 /* Largest parcel accepted, in 4kB pages */
 #define RPMI_TEE_PARCEL_MAX_PAGES		1024
 
+/*
+ * Upper bound on the number of memory blocks (contiguous page runs) a parcel
+ * can be described with. The framework (OpenSBI TEE_PARCEL_MAX_BLOCKS) caps a
+ * parcel's block count at creation, so a PARCEL_ACCEPT response never carries
+ * more than this many blocks regardless of the page count. Used to size the
+ * response buffer: sizing it by RPMI_TEE_PARCEL_MAX_PAGES instead over-
+ * allocated ~8 kB of core heap on every accept (16x), which under concurrent
+ * crypto/storage load intermittently exhausted the heap and failed the accept
+ * -> set_fmem_param() BAD_PARAMETERS on a freshly registered client buffer.
+ */
+#define RPMI_TEE_PARCEL_MAX_BLOCKS		64
+
 /* TEE_CALL request as delivered by the framework */
 struct rpmi_tee_call {
 	uint32_t sender_id;
@@ -181,7 +193,7 @@ static struct mobj *rpmi_tee_parcel_accept(uint64_t cookie,
 		.max_pages = RPMI_TEE_PARCEL_MAX_PAGES,
 	};
 	struct rpmi_tee_parcel_accept_rsp *rsp = NULL;
-	size_t rsp_size = sizeof(*rsp) + 2 * RPMI_TEE_PARCEL_MAX_PAGES *
+	size_t rsp_size = sizeof(*rsp) + 2 * RPMI_TEE_PARCEL_MAX_BLOCKS *
 			  sizeof(uint32_t);
 	struct mobj *mobj = NULL;
 	paddr_t *pages = NULL;
@@ -200,7 +212,8 @@ static struct mobj *rpmi_tee_parcel_accept(uint64_t cookie,
 		EMSG("PARCEL_ACCEPT %#"PRIx64": %d", cookie, rc);
 		goto out;
 	}
-	if (rsp_len < sizeof(*rsp) + 2 * rsp->block_cnt * sizeof(uint32_t) ||
+	if (rsp->block_cnt > RPMI_TEE_PARCEL_MAX_BLOCKS ||
+	    rsp_len < sizeof(*rsp) + 2 * rsp->block_cnt * sizeof(uint32_t) ||
 	    rsp->page_cnt > RPMI_TEE_PARCEL_MAX_PAGES || !rsp->page_cnt) {
 		EMSG("PARCEL_ACCEPT %#"PRIx64": bad block list", cookie);
 		goto out;

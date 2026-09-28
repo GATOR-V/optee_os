@@ -351,6 +351,8 @@ static void init_secondary_helper(void)
 	thread_set_exceptions(THREAD_EXCP_ALL);
 
 	thread_init_per_cpu();
+	/* The timer is per-hart, the primary only disarmed its own */
+	riscv_stop_timer();
 	boot_secondary_init_intc();
 	sbi_mpxy_init();
 

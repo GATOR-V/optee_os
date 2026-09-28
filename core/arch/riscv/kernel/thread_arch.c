@@ -15,6 +15,7 @@
 #include <io.h>
 #include <keep.h>
 #include <kernel/boot.h>
+#include <kernel/hart.h>
 #include <kernel/interrupt.h>
 #include <kernel/linker.h>
 #include <kernel/lockdep.h>
@@ -183,7 +184,13 @@ void thread_native_interrupt_handler(struct thread_ctx_regs *regs,
 {
 	switch (cause & LONG_MAX) {
 	case IRQ_XTIMER:
-		clear_csr(CSR_XIE, CSR_XIE_TIE);
+		/*
+		 * OP-TEE schedules no timer interrupt, so this is one left
+		 * pending by whoever ran before it. Masking the enable bit
+		 * alone would leave xIP.xTIP set, and the interrupt would be
+		 * taken again as soon as it is unmasked.
+		 */
+		riscv_stop_timer();
 		break;
 	case IRQ_XSOFT:
 		thread_unhandled_trap(regs, cause);

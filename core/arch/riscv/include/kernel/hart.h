@@ -104,4 +104,14 @@ bool riscv_isa_ext_available(enum riscv_isa_ext ext);
 unsigned int riscv_cbom_block_size(void);
 unsigned int riscv_cboz_block_size(void);
 
+/*
+ * riscv_stop_timer() - Disarm the timer of the calling hart
+ *
+ * OP-TEE reads the time counter but never schedules a timer interrupt, so
+ * the timer stays disarmed for its whole lifetime. Called on every hart
+ * once the ISA extensions are known, and after a hart has taken a timer
+ * interrupt that was left pending by whoever ran before OP-TEE.
+ */
+void riscv_stop_timer(void);
+
 #endif /*__KERNEL_HART_H*/

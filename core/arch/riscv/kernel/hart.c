@@ -15,6 +15,7 @@
 #include <libfdt.h>
 #include <mm/core_mmu.h>
 #include <riscv.h>
+#include <sbi.h>
 #include <stdio.h>
 #include <string.h>
 #include <trace.h>
@@ -565,6 +566,42 @@ unsigned int riscv_cboz_block_size(void)
 	return cache_block_size(&cboz_block);
 }
 
+void riscv_stop_timer(void)
+{
+	/*
+	 * Clearing the timer interrupt enable is not enough: xIP.xTIP follows
+	 * the timer comparator, so a deadline that is already in the past
+	 * keeps the interrupt pending and it is taken again as soon as
+	 * interrupts are unmasked. The comparator itself has to be pushed
+	 * beyond any reachable time value.
+	 */
+	if (IS_ENABLED(CFG_RISCV_S_MODE) &&
+	    riscv_isa_ext_available(RISCV_ISA_EXT_SSTC)) {
+		/*
+		 * Sstc: the deadline is the stimecmp CSR. On RV32 it is a
+		 * pair of CSRs, write the high half last so no intermediate
+		 * value is in the past.
+		 */
+		write_csr(CSR_STIMECMP, ULONG_MAX);
+		if (!IS_ENABLED(CFG_RV64_core))
+			write_csr(CSR_STIMECMPH, ULONG_MAX);
+	} else if (IS_ENABLED(CFG_RISCV_SBI)) {
+		/* Without Sstc the deadline is owned by the SBI firmware */
+		sbi_set_timer(UINT64_MAX);
+	} else {
+		/*
+		 * An M-mode OP-TEE owns mtimecmp through the platform timer
+		 * device, and there is no SBI to delegate to. Masking the
+		 * enable bit is all that can be done here; it is enough
+		 * because nothing re-enables it.
+		 */
+		clear_csr(CSR_XIE, CSR_XIE_TIE);
+		return;
+	}
+
+	clear_csr(CSR_XIE, CSR_XIE_TIE);
+}
+
 void hart_features_init(void)
 {
 	const void *fdt = get_external_dt();
@@ -581,4 +618,9 @@ void hart_features_init(void)
 	check_build_isa();
 	check_mmu_mode();
 	check_cache_block();
+	/*
+	 * Needs the ISA extensions above to tell whether the timer is
+	 * programmed through stimecmp or through the SBI.
+	 */
+	riscv_stop_timer();
 }

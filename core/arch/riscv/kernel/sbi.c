@@ -166,6 +166,37 @@ int sbi_dbcn_write_byte(unsigned char ch)
 }
 
 /**
+ * sbi_set_timer() - Program the supervisor timer of the calling hart
+ * @stime_value: Absolute time value, in the units of the time CSR, at which
+ *               the timer interrupt is to be delivered. A value that is never
+ *               reached (UINT64_MAX) leaves the timer permanently disarmed.
+ *
+ * Programming the timer clears any pending timer interrupt of the calling
+ * hart. Only available without Sstc: with Sstc the deadline is written to
+ * the stimecmp CSR directly.
+ *
+ * Return:      SBI error code (SBI_SUCCESS = 0 on success)
+ */
+int sbi_set_timer(uint64_t stime_value)
+{
+	struct sbiret ret = { };
+
+	/*
+	 * RV32 passes a 64-bit argument in a register pair, low word first.
+	 * On RV64 the value fits one register and the second argument is
+	 * ignored by the firmware.
+	 */
+	if (sizeof(unsigned long) == sizeof(uint32_t))
+		ret = sbi_ecall(SBI_EXT_TIME, SBI_EXT_TIME_SET_TIMER,
+				(uint32_t)stime_value, stime_value >> 32);
+	else
+		ret = sbi_ecall(SBI_EXT_TIME, SBI_EXT_TIME_SET_TIMER,
+				stime_value);
+
+	return ret.error;
+}
+
+/**
  * sbi_hsm_hart_start() - Start target hart at OP-TEE entry in S-mode
  * @hartid:     Target hart ID
  * @start_addr: Physical address of OP-TEE entry
